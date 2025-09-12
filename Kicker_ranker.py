@@ -98,7 +98,7 @@ if uploaded_file is not None:
 
     # --- Show top 5 ranked kickers ---
     st.subheader("Top 5 Kickers This Week")
-    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore"]].head(5))
+    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore"]].head(32))
 
     # --- Save ranked CSV ---
     df_ranked.to_csv("week2_kickers_ranked.csv", index=False)

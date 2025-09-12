@@ -48,6 +48,54 @@ def score_boost(boost_flag):
     return 0
 
 def tie_breaker(row):
+    """Small adjustment to separate close scores."""
+    tie_adjust = 0
+    tie_adjust += (row["O/U"] - 40) / 15 * 0.5
+    boost_flag = str(row.get("Boost", "")).lower()
+    if "denver" in boost_flag or "altitude" in boost_flag:
+        tie_adjust += 0.3
+    elif "division" in boost_flag or "slugfest" in boost_flag:
+        tie_adjust += 0.2
+    elif "yes" in boost_flag:
+        tie_adjust += 0.2
+    return tie_adjust
+
+# --- MAIN SCORING FUNCTION ---
+def apply_kicker_rules(df):
+    df["RuleScore"] = (
+        df["O/U"].apply(score_game_total) * 1.5
+        + df["Spread"].apply(score_spread) * 1
+        + df["Weather"].apply(score_weather) * 0.5
+        + df["OFF RNK"].apply(score_offense_rank) * 1
+        + df["RZ EFF*"].apply(score_rz_eff) * 2
+        + df["OPP RZ D"].apply(score_rz_def) * 2
+        + df["Boost"].apply(score_boost) * 0.5
+    )
+    df["RuleScore"] += df.apply(tie_breaker, axis=1)
+    df = df.sort_values("RuleScore", ascending=False).reset_index(drop=True)
+    return df
+
+# --- Apply scoring ---
+df_ranked = apply_kicker_rules(df)
+
+# --- Show top-ranked kickers ---
+print(df_ranked[["Rank","Name","TEAM","RuleScore"]])
+
+# --- Save ranked CSV ---
+df_ranked.to_csv("week2_kickers_ranked.csv", index=False)    return 1
+
+def score_boost(boost_flag):
+    if pd.isna(boost_flag) or boost_flag == "": return 0
+    boost_flag = str(boost_flag).lower()
+    if "denver" in boost_flag or "altitude" in boost_flag:
+        return 3
+    if "division" in boost_flag or "slugfest" in boost_flag:
+        return 2
+    if "yes" in boost_flag:
+        return 2
+    return 0
+
+def tie_breaker(row):
     tie_adjust = 0
     tie_adjust += (row["O/U"] - 40) / 15 * 0.5
     boost_flag = str(row.get("Boost", "")).lower()

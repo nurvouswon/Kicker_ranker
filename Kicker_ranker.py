@@ -1,10 +1,12 @@
+import streamlit as st
 import pandas as pd
-# === Step 1: Load your kicker chart ===
-# Save your chart into a CSV file named "week2_kickers.csv"
-# Make sure headers match what’s in the chart: 
-# ["Rank","ECR","Name","TEAM","Opponent","O/U","Spread","OPP RZ D","RZ EFF","OFF RNK","Consistency","Weather"]
-df = pd.read_csv("week2_kickers.csv")
 
+uploaded_file = st.file_uploader("Upload your kicker CSV", type=["csv"])
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.write(df.head())
+else:
+    st.warning("Please upload the CSV file to continue.")
 # --- SCORING HELPERS ---
 def score_game_total(ou):
     if ou >= 50: return 5

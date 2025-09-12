@@ -1,4 +1,9 @@
 import pandas as pd
+# === Step 1: Load your kicker chart ===
+# Save your chart into a CSV file named "week2_kickers.csv"
+# Make sure headers match what’s in the chart: 
+# ["Rank","ECR","Name","TEAM","Opponent","O/U","Spread","OPP RZ D","RZ EFF","OFF RNK","Consistency","Weather"]
+df = pd.read_csv("week2_kickers.csv")
 
 # --- SCORING HELPERS ---
 def score_game_total(ou):
@@ -17,7 +22,8 @@ def score_spread(spread):
 def score_weather(weather):
     if weather == 0: return 3  # dome/controlled
     if weather == 1: return 2  # neutral
-    return 0  # bad
+    if weather == 2: return 1
+    if weather == 3: return 0  # bad
 
 def score_offense_rank(rank):
     if rank <= 15: return 3

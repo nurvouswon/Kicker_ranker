@@ -10,55 +10,80 @@ if uploaded_file is not None:
     df.columns = df.columns.str.strip()  # remove trailing spaces
 
     # --- SCORING HELPERS ---
+
+    # Granular O/U scoring (1 point increments)
     def score_game_total(ou):
         if ou >= 50:
             return 5
-        if ou >= 47.5:
+        elif ou >= 49:
+            return 4.5
+        elif ou >= 48:
             return 4
-        if ou >= 45:
+        elif ou >= 47:
+            return 3.5
+        elif ou >= 46:
             return 3
-        if ou >= 42.5:
+        elif ou >= 45:
+            return 2.5
+        elif ou >= 44:
             return 2
+        elif ou >= 42.5:
+            return 1.5
         return 1
 
+    # Granular spread scoring
     def score_spread(spread):
-        # Heavy favorite (-10 to -3) OR slight underdog (+1 to +3)
-        if -10 <= spread <= -3 or 1 <= spread <= 3:
+        if -10 <= spread <= -7:
+            return 4.5
+        elif -7 < spread <= -3:
             return 4
-        # Moderate favorite (-2.5 to 0)
-        if -2.5 <= spread < 0:
+        elif -3 < spread <= 0:
             return 3
-        # Extreme heavy favorite (< -10)
-        if spread < -10:
+        elif 0 < spread <= 3:
+            return 3
+        elif 3 < spread <= 7:
             return 2
-        # Other underdogs
-        return 1
+        else:
+            return 1
 
+    # Weather (categorical)
     def score_weather(weather):
         return {0: 3, 1: 2, 2: 1, 3: 0}.get(weather, 1)
 
+    # Granular offense rank (top 32)
     def score_offense_rank(rank):
-        if rank <= 15:
+        if rank <= 8:
             return 3
-        if rank <= 20:
+        elif rank <= 16:
+            return 2.5
+        elif rank <= 24:
             return 2
-        return 1
+        else:
+            return 1
 
+    # Red-zone efficiency (higher is better)
     def score_rz_eff(rz_eff):
-        # Higher redzone inefficiency = better for kicker
-        if rz_eff >= 20:
+        if rz_eff >= 25:
+            return 4
+        elif rz_eff >= 20:
             return 3
-        if rz_eff >= 10:
+        elif rz_eff >= 10:
             return 2
-        return 1
+        else:
+            return 1
 
+    # Opponent red-zone defense (higher is better)
     def score_rz_def(rz_def):
-        if rz_def >= 20:
+        if rz_def >= 25:
+            return 4
+        elif rz_def >= 20:
             return 3
-        if rz_def >= 10:
+        elif rz_def >= 10:
             return 2
-        return 1
+        else:
+            return 1
 
+    # Boosts (Denver, Division, etc.)
     def score_boost(boost_flag):
         if pd.isna(boost_flag) or boost_flag == "":
             return 0
@@ -71,6 +96,7 @@ if uploaded_file is not None:
             return 2
         return 0
 
+    # Tie-breaker adjustment
     def tie_breaker(row):
         tie_adjust = 0
         tie_adjust += (row["O/U"] - 40) / 15 * 0.5
@@ -101,9 +127,9 @@ if uploaded_file is not None:
     # --- Apply scoring ---
     df_ranked = apply_kicker_rules(df)
 
-    # --- Show all kickers ranked ---
-    st.subheader("All Ranked Kickers")
-    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore"]])
+    # --- Show all 32 ranked kickers ---
+    st.subheader("All Ranked Kickers This Week")
+    st.dataframe(df_ranked[["Rank", "Name", "TEAM", "RuleScore"]].head(32))
 
     # --- Save ranked CSV ---
     df_ranked.to_csv("week2_kickers_ranked.csv", index=False)

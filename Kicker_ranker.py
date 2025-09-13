@@ -22,12 +22,16 @@ if uploaded_file is not None:
         return 1
 
     def score_spread(spread):
-        if -10 <= spread <= -3:
+        # Heavy favorite (-10 to -3) OR slight underdog (+1 to +3)
+        if -10 <= spread <= -3 or 1 <= spread <= 3:
             return 4
+        # Moderate favorite (-2.5 to 0)
         if -2.5 <= spread < 0:
             return 3
+        # Extreme heavy favorite (< -10)
         if spread < -10:
             return 2
+        # Other underdogs
         return 1
 
     def score_weather(weather):
@@ -41,6 +45,7 @@ if uploaded_file is not None:
         return 1
 
     def score_rz_eff(rz_eff):
+        # Higher redzone inefficiency = better for kicker
         if rz_eff >= 20:
             return 3
         if rz_eff >= 10:
@@ -96,9 +101,9 @@ if uploaded_file is not None:
     # --- Apply scoring ---
     df_ranked = apply_kicker_rules(df)
 
-    # --- Show top 5 ranked kickers ---
-    st.subheader("Top 5 Kickers This Week")
-    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore"]].head(32))
+    # --- Show all kickers ranked ---
+    st.subheader("All Ranked Kickers")
+    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore"]])
 
     # --- Save ranked CSV ---
     df_ranked.to_csv("week2_kickers_ranked.csv", index=False)

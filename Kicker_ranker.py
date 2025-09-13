@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-st.title("NFL Kicker Ranking Tool")
+st.title("NFL Kicker Ranking & Projection Tool")
 
 # --- CSV UPLOADER ---
 uploaded_file = st.file_uploader("Upload your kicker CSV", type=["csv"])
@@ -13,25 +13,22 @@ if uploaded_file is not None:
     def score_game_total(ou):
         if ou >= 50:
             return 5
-        elif ou >= 47.5:
+        if ou >= 47.5:
             return 4
-        elif ou >= 45:
+        if ou >= 45:
             return 3
-        elif ou >= 42.5:
+        if ou >= 42.5:
             return 2
-        else:
-            return 1
+        return 1
 
     def score_spread(spread):
-        # Slight underdog or slight favorite treated similarly
-        if -10 <= spread <= -3:
+        if spread <= -7:
             return 4
-        elif -2 <= spread <= 3:
+        if -6.5 <= spread <= -3:
             return 3
-        elif spread < -10:
+        if -2.5 <= spread <= 3:
             return 2
-        else:  # Heavy underdog
-            return 1
+        return 1
 
     def score_weather(weather):
         return {0: 3, 1: 2, 2: 1, 3: 0}.get(weather, 1)
@@ -39,68 +36,69 @@ if uploaded_file is not None:
     def score_offense_rank(rank):
         if rank <= 15:
             return 3
-        elif rank <= 20:
+        if rank <= 20:
             return 2
-        else:
-            return 1
+        return 1
 
     def score_rz_eff(rz_eff):
-        # Higher RZ efficiency = more FG opportunities
         if rz_eff >= 20:
             return 3
-        elif rz_eff >= 10:
+        if rz_eff >= 10:
             return 2
-        else:
-            return 1
+        return 1
 
     def score_rz_def(rz_def):
-        # Higher opponent RZ number = worse defense = better for kicker
         if rz_def >= 20:
             return 3
-        elif rz_def >= 10:
+        if rz_def >= 10:
             return 2
-        else:
-            return 1
+        return 1
 
+    # --- BOOST NUMERIC MAP ---
     def score_boost(boost_flag):
         if pd.isna(boost_flag) or boost_flag == "":
             return 0
         boost_flag = str(boost_flag).lower()
         if "denver" in boost_flag or "altitude" in boost_flag:
-            return 3
-        elif "division" in boost_flag or "slugfest" in boost_flag:
-            return 2
-        elif "yes" in boost_flag:
-            return 2
+            return 1.5
+        if "division" in boost_flag:
+            return 1
+        if "slugfest" in boost_flag:
+            return 0.5
         return 0
 
-    # --- TIE BREAKER FUNCTION ---
+    # --- TIEBREAKER (small decimal adjustments) ---
     def tie_breaker(row):
         tie_adjust = 0
         tie_adjust += (row["O/U"] - 40) / 15 * 0.5
         boost_flag = str(row.get("Boost", "")).lower()
-        if "denver" in boost_flag or "altitude" in boost_flag:
+        if "denver" in boost_flag:
             tie_adjust += 0.3
-        elif "division" in boost_flag or "slugfest" in boost_flag:
+        elif "division" in boost_flag:
             tie_adjust += 0.2
-        elif "yes" in boost_flag:
-            tie_adjust += 0.2
+        elif "slugfest" in boost_flag:
+            tie_adjust += 0.1
         return tie_adjust
 
-    # --- SYNERGY BONUS ---
-    def synergy_bonus(row):
-        bonus = 0
-        # High O/U + slight favorite to heavy favorite
-        if row["O/U"] >= 45 and -10 <= row["Spread"] <= 3:
-            bonus += 0.5
-        # Boost flags + high O/U
-        boost_flag = str(row.get("Boost", "")).lower()
-        if ("denver" in boost_flag or "altitude" in boost_flag or "division" in boost_flag) and row["O/U"] >= 45:
-            bonus += 0.5
-        # Weak RZ defense + mid-tier offense
-        if row["OPP RZ D"] >= 20 and 15 <= row["OFF RNK"] <= 25:
-            bonus += 0.3
-        return bonus
+    # --- PROJECTED POINTS (simple Vegas-based) ---
+    def project_points(row):
+        ou = row["O/U"]
+        spread = row["Spread"]
+
+        # Approximate implied team total
+        team_total = (ou / 2) - (spread / 2)
+
+        # Estimate attempts
+        fg_attempts = team_total * 0.3
+        xp_attempts = team_total * 0.7
+
+        # Fantasy scoring
+        base_points = fg_attempts * 3 + xp_attempts * 1
+
+        # Apply rule score scaling + boosts
+        adj_points = base_points * (1 + (row["RuleScore"] / 50)) + row["BoostScore"]
+
+        return round(adj_points, 1)
 
     # --- MAIN SCORING FUNCTION ---
     def apply_kicker_rules(df):
@@ -111,20 +109,24 @@ if uploaded_file is not None:
             + df["OFF RNK"].apply(score_offense_rank) * 1
             + df["RZ EFF*"].apply(score_rz_eff) * 2
             + df["OPP RZ D"].apply(score_rz_def) * 2
-            + df["Boost"].apply(score_boost) * 0.5
         )
+        df["BoostScore"] = df["Boost"].apply(score_boost)
+        df["RuleScore"] += df["BoostScore"]
         df["RuleScore"] += df.apply(tie_breaker, axis=1)
-        df["RuleScore"] += df.apply(synergy_bonus, axis=1)
-        df = df.sort_values("RuleScore", ascending=False).reset_index(drop=True)
+
+        # Project fantasy points
+        df["ProjPoints"] = df.apply(project_points, axis=1)
+
+        df = df.sort_values("ProjPoints", ascending=False).reset_index(drop=True)
         return df
 
     # --- Apply scoring ---
     df_ranked = apply_kicker_rules(df)
 
-    # --- Show all ranked kickers ---
-    st.subheader("Ranked Kickers This Week")
-    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore"]].head(32))
+    # --- Show ranked kickers ---
+    st.subheader("Ranked Kickers with Projections")
+    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore","Boost","BoostScore","ProjPoints"]])
 
     # --- Save ranked CSV ---
-    df_ranked.to_csv("week2_kickers_ranked.csv", index=False)
-    st.success("Full ranked CSV saved as week2_kickers_ranked.csv")
+    df_ranked.to_csv("week1_kickers_ranked.csv", index=False)
+    st.success("Full ranked CSV saved as week1_kickers_ranked.csv")

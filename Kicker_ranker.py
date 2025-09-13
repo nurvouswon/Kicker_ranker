@@ -3,130 +3,87 @@ import streamlit as st
 
 st.title("NFL Kicker Ranking & Projection Tool")
 
-# --- CSV UPLOADER ---
-uploaded_file = st.file_uploader("Upload your kicker CSV", type=["csv"])
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    df.columns = df.columns.str.strip()  # remove trailing spaces
+# --- CSV UPLOAD ---
+current_file = st.file_uploader("Upload this week's kicker CSV", type=["csv"])
+historical_file = st.file_uploader("Optional: Upload previous weeks CSV with OutcomePoints", type=["csv"])
 
-    # --- SCORING HELPERS ---
-    def score_game_total(ou):
-        if ou >= 50:
-            return 5
-        if ou >= 47.5:
-            return 4
-        if ou >= 45:
-            return 3
-        if ou >= 42.5:
-            return 2
-        return 1
+# --- Base Scoring Values ---
+XP_POINTS = 1
+FG_0_39 = 3
+FG_40_49 = 4
+FG_50_PLUS = 5
 
-    def score_spread(spread):
-        if spread <= -7:
-            return 4
-        if -6.5 <= spread <= -3:
-            return 3
-        if -2.5 <= spread <= 3:
-            return 2
-        return 1
+# --- Boost mapping ---
+BOOST_VALUES = {
+    "denver": 1.0,      # altitude boost
+    "altitude": 1.0,
+    "division": 0.5,    # divisional boost
+    "slugfest": 0.5,
+    "yes": 0.5
+}
 
-    def score_weather(weather):
-        return {0: 3, 1: 2, 2: 1, 3: 0}.get(weather, 1)
+def compute_boost_numeric(boost_label):
+    if pd.isna(boost_label) or boost_label == "":
+        return 0.0
+    boost_label = str(boost_label).lower()
+    value = 0.0
+    for key, val in BOOST_VALUES.items():
+        if key in boost_label:
+            value += val
+    return value
 
-    def score_offense_rank(rank):
-        if rank <= 15:
-            return 3
-        if rank <= 20:
-            return 2
-        return 1
+def project_fantasy_points(row, historical_avg=None):
+    # baseline assumptions if historical data is not provided
+    xp_attempts = row.get("XP_Attempts", 2)
+    fg_0_39_attempts = row.get("FG_0_39", 2)
+    fg_40_49_attempts = row.get("FG_40_49", 1)
+    fg_50_plus_attempts = row.get("FG_50_plus", 0.5)
 
-    def score_rz_eff(rz_eff):
-        if rz_eff >= 20:
-            return 3
-        if rz_eff >= 10:
-            return 2
-        return 1
+    # apply boost multiplier (increase attempts proportionally)
+    boost_multiplier = 1 + compute_boost_numeric(row.get("Boost", ""))
+    xp_attempts *= boost_multiplier
+    fg_0_39_attempts *= boost_multiplier
+    fg_40_49_attempts *= boost_multiplier
+    fg_50_plus_attempts *= boost_multiplier
 
-    def score_rz_def(rz_def):
-        if rz_def >= 20:
-            return 3
-        if rz_def >= 10:
-            return 2
-        return 1
+    proj_points = (
+        xp_attempts * XP_POINTS +
+        fg_0_39_attempts * FG_0_39 +
+        fg_40_49_attempts * FG_40_49 +
+        fg_50_plus_attempts * FG_50_PLUS
+    )
 
-    # --- BOOST NUMERIC MAP ---
-    def score_boost(boost_flag):
-        if pd.isna(boost_flag) or boost_flag == "":
-            return 0
-        boost_flag = str(boost_flag).lower()
-        if "denver" in boost_flag or "altitude" in boost_flag:
-            return 1.5
-        if "division" in boost_flag:
-            return 1
-        if "slugfest" in boost_flag:
-            return 0.5
-        return 0
+    # if historical average provided, blend 70/30 with projection
+    if historical_avg is not None:
+        proj_points = 0.7 * proj_points + 0.3 * historical_avg
 
-    # --- TIEBREAKER (small decimal adjustments) ---
-    def tie_breaker(row):
-        tie_adjust = 0
-        tie_adjust += (row["O/U"] - 40) / 15 * 0.5
-        boost_flag = str(row.get("Boost", "")).lower()
-        if "denver" in boost_flag:
-            tie_adjust += 0.3
-        elif "division" in boost_flag:
-            tie_adjust += 0.2
-        elif "slugfest" in boost_flag:
-            tie_adjust += 0.1
-        return tie_adjust
+    return round(proj_points, 1)
 
-    # --- PROJECTED POINTS (simple Vegas-based) ---
-    def project_points(row):
-        ou = row["O/U"]
-        spread = row["Spread"]
+if current_file is not None:
+    df = pd.read_csv(current_file)
+    df.columns = df.columns.str.strip()
 
-        # Approximate implied team total
-        team_total = (ou / 2) - (spread / 2)
+    # compute numeric boost
+    df["Boost_Num"] = df["Boost"].apply(compute_boost_numeric)
 
-        # Estimate attempts
-        fg_attempts = team_total * 0.3
-        xp_attempts = team_total * 0.7
+    # --- historical average points if historical file uploaded ---
+    historical_avg_map = {}
+    if historical_file is not None:
+        hist_df = pd.read_csv(historical_file)
+        hist_df.columns = hist_df.columns.str.strip()
+        historical_avg_map = hist_df.groupby("Name")["OutcomePoints"].mean().to_dict()
 
-        # Fantasy scoring
-        base_points = fg_attempts * 3 + xp_attempts * 1
+    # --- Project Fantasy Points ---
+    proj_points_list = []
+    for _, row in df.iterrows():
+        hist_avg = historical_avg_map.get(row["Name"], None)
+        proj_points_list.append(project_fantasy_points(row, hist_avg))
+    df["ProjPoints"] = proj_points_list
 
-        # Apply rule score scaling + boosts
-        adj_points = base_points * (1 + (row["RuleScore"] / 50)) + row["BoostScore"]
+    # --- Show full kicker table with projections ---
+    st.subheader("Kicker Projections for This Week")
+    st.dataframe(df[["Rank","Name","TEAM","Opponent","O/U","Spread","Boost","Boost_Num","ProjPoints"]])
 
-        return round(adj_points, 1)
-
-    # --- MAIN SCORING FUNCTION ---
-    def apply_kicker_rules(df):
-        df["RuleScore"] = (
-            df["O/U"].apply(score_game_total) * 1.5
-            + df["Spread"].apply(score_spread) * 1
-            + df["Weather"].apply(score_weather) * 0.5
-            + df["OFF RNK"].apply(score_offense_rank) * 1
-            + df["RZ EFF*"].apply(score_rz_eff) * 2
-            + df["OPP RZ D"].apply(score_rz_def) * 2
-        )
-        df["BoostScore"] = df["Boost"].apply(score_boost)
-        df["RuleScore"] += df["BoostScore"]
-        df["RuleScore"] += df.apply(tie_breaker, axis=1)
-
-        # Project fantasy points
-        df["ProjPoints"] = df.apply(project_points, axis=1)
-
-        df = df.sort_values("ProjPoints", ascending=False).reset_index(drop=True)
-        return df
-
-    # --- Apply scoring ---
-    df_ranked = apply_kicker_rules(df)
-
-    # --- Show ranked kickers ---
-    st.subheader("Ranked Kickers with Projections")
-    st.dataframe(df_ranked[["Rank","Name","TEAM","RuleScore","Boost","BoostScore","ProjPoints"]])
-
-    # --- Save ranked CSV ---
-    df_ranked.to_csv("week1_kickers_ranked.csv", index=False)
-    st.success("Full ranked CSV saved as week1_kickers_ranked.csv")
+    # --- Save CSV ---
+    df.to_csv("kicker_projections_week.csv", index=False)
+    st.success("CSV with projections saved as kicker_projections_week.csv")

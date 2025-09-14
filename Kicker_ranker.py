@@ -1,14 +1,13 @@
 import pandas as pd
 import streamlit as st
-import xgboost as xgb
+from sklearn.linear_model import LinearRegression
+import numpy as np
 
 st.title("🏈 NFL Kicker Ranking & Projection Tool")
 
 # --- CSV UPLOADER ---
 uploaded_file = st.file_uploader("Upload this week's kicker CSV", type=["csv"])
-history_file = st.file_uploader(
-    "Optional: Upload previous weeks with 'FantasyPoints' column", type=["csv"]
-)
+history_file = st.file_uploader("Optional: Upload previous weeks with 'score_outcome' column", type=["csv"])
 
 # --- SCORING HELPERS ---
 def score_game_total(ou):
@@ -58,13 +57,15 @@ def score_boost(boost_flag):
         return 1
     return 0
 
-# --- Fantasy Point Projection ---
+# --- Granular Fantasy Point Projection ---
 def projected_points(row):
     base_attempts = max(1, (row["RuleScore"]/10 + row["O/U"]/50 + row["RZ EFF*"]/20))
+    
     xp_attempts = max(0.5, min(base_attempts*0.5, row["RZ EFF*"]/10))
     fg_1_39 = max(0, base_attempts*0.3)
     fg_40_49 = max(0, base_attempts*0.2)
     fg_50p  = max(0, base_attempts*0.1 + 0.05*row["Boost_Num"])
+    
     points = xp_attempts*1 + fg_1_39*3 + fg_40_49*4 + fg_50p*5
     return round(points, 1)
 
@@ -97,24 +98,25 @@ if uploaded_file is not None:
     df_ranked.to_csv("week_kickers_ranked.csv", index=False)
     st.success("✅ Full ranked CSV saved as week_kickers_ranked.csv")
 
-    # --- Optional ML projection using XGBoost ---
+    # --- Optional ML projection using score_outcome ---
     if history_file is not None:
         hist = pd.read_csv(history_file)
-        hist = hist.dropna(subset=["FantasyPoints"])
+        hist = hist.dropna(subset=["score_outcome"])
         
         features = ["RuleScore", "Boost_Num", "O/U", "Spread", "RZ EFF*", "OPP RZ D", "OFF RNK"]
         X_train = hist[features]
-        y_train = hist["FantasyPoints"]
+        y_train = hist["score_outcome"]
         
-        model = xgb.XGBRegressor(
-            n_estimators=50,
-            max_depth=3,
-            learning_rate=0.1,
-            random_state=42
-        )
-        model.fit(X_train, y_train)
-        
-        df_ranked["ML_Pred"] = model.predict(df_ranked[features]).round(1)
+        # Handle single-row historical data gracefully with tiny smoothing
+        if len(hist) < 2:
+            st.warning("⚠️ Only one historical row provided. ML prediction will be smoothed for realism.")
+            base_pred = float(y_train.iloc[0])
+            df_ranked["ML_Pred"] = df_ranked["ProjPoints"] * 0.3 + base_pred * 0.7
+            df_ranked["ML_Pred"] = df_ranked["ML_Pred"].round(1)
+        else:
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            df_ranked["ML_Pred"] = model.predict(df_ranked[features]).round(1)
         
         st.subheader("🤖 ML-Enhanced Projections (if history provided)")
         st.dataframe(df_ranked[["Name","TEAM","ProjPoints","ML_Pred"]])

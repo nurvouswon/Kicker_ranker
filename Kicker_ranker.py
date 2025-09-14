@@ -1,12 +1,14 @@
 import pandas as pd
 import streamlit as st
-from sklearn.linear_model import LinearRegression
+import xgboost as xgb
 
 st.title("🏈 NFL Kicker Ranking & Projection Tool")
 
 # --- CSV UPLOADER ---
 uploaded_file = st.file_uploader("Upload this week's kicker CSV", type=["csv"])
-history_file = st.file_uploader("Optional: Upload previous weeks with 'FantasyPoints' column", type=["csv"])
+history_file = st.file_uploader(
+    "Optional: Upload previous weeks with 'FantasyPoints' column", type=["csv"]
+)
 
 # --- SCORING HELPERS ---
 def score_game_total(ou):
@@ -17,7 +19,6 @@ def score_game_total(ou):
     return 1
 
 def score_spread(spread):
-    # Heavy favorite and small underdog both strong
     if -14 <= spread <= -7: return 5
     if -6.5 <= spread <= -3: return 4
     if -2.5 <= spread <= 3: return 3
@@ -25,7 +26,6 @@ def score_spread(spread):
     return 1
 
 def score_weather(weather):
-    # Lower is better
     return {0: 3, 1: 2, 2: 1, 3: 0}.get(weather, 1)
 
 def score_offense_rank(rank):
@@ -35,14 +35,12 @@ def score_offense_rank(rank):
     return 1
 
 def score_rz_eff(rz_eff):
-    # Better efficiency → more XP chances
     if rz_eff >= 25: return 4
     if rz_eff >= 20: return 3
     if rz_eff >= 15: return 2
     return 1
 
 def score_rz_def(rz_def):
-    # Worse defense → more FG chances
     if rz_def >= 25: return 4
     if rz_def >= 20: return 3
     if rz_def >= 15: return 2
@@ -63,12 +61,10 @@ def score_boost(boost_flag):
 # --- Fantasy Point Projection ---
 def projected_points(row):
     base_attempts = max(1, (row["RuleScore"]/10 + row["O/U"]/50 + row["RZ EFF*"]/20))
-    
     xp_attempts = max(0.5, min(base_attempts*0.5, row["RZ EFF*"]/10))
     fg_1_39 = max(0, base_attempts*0.3)
     fg_40_49 = max(0, base_attempts*0.2)
     fg_50p  = max(0, base_attempts*0.1 + 0.05*row["Boost_Num"])
-    
     points = xp_attempts*1 + fg_1_39*3 + fg_40_49*4 + fg_50p*5
     return round(points, 1)
 
@@ -88,6 +84,7 @@ def apply_kicker_rules(df):
     df = df.sort_values("ProjPoints", ascending=False).reset_index(drop=True)
     return df
 
+# --- MAIN APP LOGIC ---
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     df.columns = df.columns.str.strip()
@@ -100,7 +97,7 @@ if uploaded_file is not None:
     df_ranked.to_csv("week_kickers_ranked.csv", index=False)
     st.success("✅ Full ranked CSV saved as week_kickers_ranked.csv")
 
-    # --- Optional ML projection ---
+    # --- Optional ML projection using XGBoost ---
     if history_file is not None:
         hist = pd.read_csv(history_file)
         hist = hist.dropna(subset=["FantasyPoints"])
@@ -109,7 +106,12 @@ if uploaded_file is not None:
         X_train = hist[features]
         y_train = hist["FantasyPoints"]
         
-        model = LinearRegression()
+        model = xgb.XGBRegressor(
+            n_estimators=50,
+            max_depth=3,
+            learning_rate=0.1,
+            random_state=42
+        )
         model.fit(X_train, y_train)
         
         df_ranked["ML_Pred"] = model.predict(df_ranked[features]).round(1)
